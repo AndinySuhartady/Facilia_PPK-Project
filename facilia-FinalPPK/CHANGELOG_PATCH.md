@@ -1,4 +1,4 @@
-# Patch FACILIA — 12 Oktober 2026
+# Patch FACILIA — 10 Oktober 2026
 
 Diuji dengan PHP 8.3 + MariaDB 10.11 (skenario HTTP end-to-end, 59 pengecekan lolos).
 Database lama: jalankan `database/migration_02_notifications_and_lengths.sql` sekali.
@@ -42,7 +42,7 @@ Database lama: jalankan `database/migration_02_notifications_and_lengths.sql` se
 - `views/petugas/dashboard.php` masih memakai `<style>` inline sendiri (sekarang menampilkan flash).
 - Notifikasi email tidak ada (XAMPP tanpa SMTP); notifikasi hanya dalam aplikasi.
 
-## Patch — 12 Oktober 2026
+## Patch — 11 Oktober 2026
 
 ### Fitur baru
 - **Antrean Reservasi (petugas)**: filter & sort by fasilitas, tanggal (input kalender `type=date`, sama seperti saat reservasi), jam (menampilkan reservasi yang sedang berlangsung pada jam tsb), dan pencarian user (nama/email). Header tabel bisa diklik untuk sort naik/turun; filter status tetap tersimpan saat filter lain dipakai. Semua input divalidasi/whitelist di `PetugasController::reservationQueue()` dan query memakai prepared statement (`Reservation::search()`).
@@ -51,7 +51,7 @@ Database lama: jalankan `database/migration_02_notifications_and_lengths.sql` se
 - **Dialog konfirmasi reservasi muncul di kiri bawah & tidak bisa diklik**: penyebabnya browser memakai `style.css` versi lama dari cache sehingga gaya `.confirm-modal` tidak ada dan dialog tertutup sidebar. Sekarang `style.css` diberi versi otomatis (`?v=filemtime`) dan gaya inti dialog ditanam langsung di `layouts/footer.php`.
 - **UI petugas berubah saat membuka Dashboard Petugas**: dashboard kini memakai layout bersama (`layouts/header.php`), sehingga sidebar sama di semua halaman petugas. Sidebar petugas menampilkan angka antrean: reservasi PENDING dan laporan kerusakan BARU (merah jika > 0).
 
-## Patch 2 — 12 Oktober 2026
+## Patch 2 — 11 Oktober 2026
 
 ### Fitur baru
 - **Search & sort Riwayat Reservasi (user)**: cari nama fasilitas/tujuan, filter status & tanggal (kalender), urutkan tanggal/waktu pengajuan/fasilitas/status. Judul kolom bisa diklik.
