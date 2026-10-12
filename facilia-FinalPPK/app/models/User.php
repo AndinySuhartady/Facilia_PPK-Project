@@ -71,6 +71,30 @@ class User
         $stmt->execute([$status, $id]);
     }
 
+    public static function updateRole(int $id, string $role): void
+    {
+        $stmt = getDB()->prepare('UPDATE users SET role = ? WHERE id = ?');
+        $stmt->execute([$role, $id]);
+    }
+
+    public static function updatePassword(int $id, string $hashedPassword): void
+    {
+        $stmt = getDB()->prepare('UPDATE users SET password = ? WHERE id = ?');
+        $stmt->execute([$hashedPassword, $id]);
+    }
+
+    /** Statistik ringan untuk dashboard (menggantikan count(User::all())). */
+    public static function countAll(?string $verificationStatus = null): int
+    {
+        if ($verificationStatus) {
+            $stmt = getDB()->prepare('SELECT COUNT(*) AS total FROM users WHERE verification_status = ?');
+            $stmt->execute([$verificationStatus]);
+        } else {
+            $stmt = getDB()->query('SELECT COUNT(*) AS total FROM users');
+        }
+        return (int) $stmt->fetch()['total'];
+    }
+
     public static function countByRole(string $role): int
     {
         $stmt = getDB()->prepare('SELECT COUNT(*) AS total FROM users WHERE role = ?');

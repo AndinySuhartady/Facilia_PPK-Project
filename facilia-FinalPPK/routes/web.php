@@ -15,6 +15,7 @@ require_once __DIR__ . '/../app/controllers/FacilityController.php';
 require_once __DIR__ . '/../app/controllers/ReservationController.php';
 require_once __DIR__ . '/../app/controllers/ReportController.php';
 require_once __DIR__ . '/../app/controllers/PetugasController.php';
+require_once __DIR__ . '/../app/controllers/AccountController.php';
 require_once __DIR__ . '/../app/middleware/PetugasMiddleware.php';
 
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
@@ -24,17 +25,40 @@ if ($uri === '') {
 }
 $method = $_SERVER['REQUEST_METHOD'];
 
+// Tidak ada form/endpoint yang memakai parameter array. Menolaknya di sini mencegah
+// TypeError (HTTP 500) pada trim()/htmlspecialchars() ketika ada ?q[]=x dan sejenisnya.
+foreach ([$_GET, $_POST] as $inputBag) {
+    foreach ($inputBag as $inputValue) {
+        if (is_array($inputValue)) {
+            http_response_code(400);
+            echo '400 — Parameter tidak valid.';
+            exit;
+        }
+    }
+}
+
 $auth = new AuthController();
 $admin = new AdminController();
 $facilityCtrl = new FacilityController();
 $reservationCtrl = new ReservationController();
 $reportCtrl = new ReportController();
 $petugasCtrl = new PetugasController();
+$accountCtrl = new AccountController();
 
 // Menjalankan aturan tenggat pada setiap request aplikasi, sehingga request
 // PENDING yang sudah mencapai hari reservasi tidak menunggu halaman tertentu
 // dibuka dahulu untuk berubah menjadi CANCELLED.
-Reservation::autoCancelExpiredPending();
+// Dibatasi maksimal sekali per 60 detik dan tidak boleh mematikan halaman bila DB bermasalah.
+// Halaman yang bergantung pada status terbaru (riwayat, antrean petugas) tetap memanggilnya langsung.
+try {
+    $autoCancelStamp = rtrim(sys_get_temp_dir(), '/\\') . DIRECTORY_SEPARATOR . 'facilia_autocancel_' . md5(__DIR__) . '.stamp';
+    if (!is_file($autoCancelStamp) || (time() - (int) @filemtime($autoCancelStamp)) >= 60) {
+        Reservation::autoCancelExpiredPending();
+        @touch($autoCancelStamp);
+    }
+} catch (Throwable $e) {
+    error_log('auto-cancel gagal: ' . $e->getMessage());
+}
 
 // -------------------- PUBLIC / AUTH --------------------
 if ($uri === '/' && $method === 'GET') {
@@ -62,6 +86,27 @@ if ($uri === '/logout' && $method === 'POST') {
     exit;
 }
 
+// -------------------- AKUN & NOTIFIKASI (semua role yang sudah login) --------------------
+if (str_starts_with($uri, '/account')) {
+    AuthMiddleware::handle();
+    match (true) {
+        $uri === '/account/password' && $method === 'GET' => $accountCtrl->showPassword(),
+        $uri === '/account/password' && $method === 'POST' => $accountCtrl->changePassword(),
+        default => http_response_code(404),
+    };
+    exit;
+}
+if (str_starts_with($uri, '/notifications')) {
+    AuthMiddleware::handle();
+    match (true) {
+        $uri === '/notifications' && $method === 'GET' => $accountCtrl->notifications(),
+        $uri === '/notifications/read' && $method === 'POST' => $accountCtrl->markNotificationsRead(),
+        $uri === '/notifications/open' && $method === 'GET' => $accountCtrl->openNotification(),
+        default => http_response_code(404),
+    };
+    exit;
+}
+
 // -------------------- ADMIN (dilindungi AdminMiddleware) --------------------
 if (str_starts_with($uri, '/admin')) {
     AdminMiddleware::handle();
@@ -72,6 +117,9 @@ if (str_starts_with($uri, '/admin')) {
         $uri === '/admin/users/verify' && $method === 'POST' => $admin->verifyUser(),
         $uri === '/admin/users/create' && $method === 'POST' => $admin->createUser(),
         $uri === '/admin/users/delete' && $method === 'POST' => $admin->deleteUser(),
+        $uri === '/admin/users/status' && $method === 'POST' => $admin->setUserStatus(),
+        $uri === '/admin/users/role' && $method === 'POST' => $admin->changeUserRole(),
+        $uri === '/admin/users/reset-password' && $method === 'POST' => $admin->resetUserPassword(),
         $uri === '/admin/facilities' && $method === 'GET' => $admin->facilities(),
         $uri === '/admin/facilities/create' && $method === 'GET' => $admin->facilityForm(),
         $uri === '/admin/facilities/edit' && $method === 'GET' => $admin->facilityForm(),

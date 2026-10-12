@@ -3,6 +3,7 @@
 require_once __DIR__ . '/../models/Facility.php';
 require_once __DIR__ . '/../models/Reservation.php';
 require_once __DIR__ . '/../helpers/slots.php';
+require_once __DIR__ . '/../helpers/validation.php';
 
 class FacilityController
 {
@@ -44,10 +45,13 @@ class FacilityController
         }
 
         $minimumReservationDate = date('Y-m-d', strtotime('+1 day'));
-        $date = $_GET['date'] ?? $minimumReservationDate;
-        // Reservasi wajib minimal H-1, jadi hari ini tidak boleh menjadi pilihan.
-        if ($date < $minimumReservationDate) {
+        $maximumReservationDate = date('Y-m-d', strtotime('+90 days'));
+        $date = (string) ($_GET['date'] ?? $minimumReservationDate);
+        // Reservasi wajib minimal H-1 dan maksimal 90 hari ke depan; tanggal tidak valid dikembalikan ke default.
+        if (!isValidDateString($date) || $date < $minimumReservationDate) {
             $date = $minimumReservationDate;
+        } elseif ($date > $maximumReservationDate) {
+            $date = $maximumReservationDate;
         }
 
         $approved = Reservation::approvedByFacilityAndDate($id, $date);

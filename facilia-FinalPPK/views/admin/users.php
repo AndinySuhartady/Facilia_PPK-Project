@@ -51,6 +51,29 @@
                         <?php elseif ((int) $u['id'] === (int) $_SESSION['user_id']): ?>
                             <span class="muted">Akun Anda</span>
                         <?php else: ?>
+                            <form method="POST" action="<?= BASE_URL ?>/admin/users/status" style="display:inline"
+                                  onsubmit="return confirm('<?= $u['verification_status'] === 'VERIFIED' ? 'Nonaktifkan akun ini? User tidak bisa login.' : 'Aktifkan kembali akun ini?' ?>');">
+                                <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
+                                <input type="hidden" name="id" value="<?= $u['id'] ?>">
+                                <input type="hidden" name="action" value="<?= $u['verification_status'] === 'VERIFIED' ? 'deactivate' : 'activate' ?>">
+                                <button type="submit" class="btn-secondary"><?= $u['verification_status'] === 'VERIFIED' ? 'Nonaktifkan' : 'Aktifkan' ?></button>
+                            </form>
+                            <form method="POST" action="<?= BASE_URL ?>/admin/users/role" style="display:inline">
+                                <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
+                                <input type="hidden" name="id" value="<?= $u['id'] ?>">
+                                <select name="role" onchange="if(confirm('Ubah role user ini?')) this.form.submit(); else this.value='<?= htmlspecialchars($u['role']) ?>';">
+                                    <?php foreach (['USER', 'PETUGAS', 'ADMIN'] as $r): ?>
+                                        <option value="<?= $r ?>" <?= $u['role'] === $r ? 'selected' : '' ?>><?= $r ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </form>
+                            <form method="POST" action="<?= BASE_URL ?>/admin/users/reset-password" style="display:inline"
+                                  onsubmit="return confirm('Reset password user ini?');">
+                                <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
+                                <input type="hidden" name="id" value="<?= $u['id'] ?>">
+                                <input type="password" name="new_password" minlength="8" maxlength="72" placeholder="Password baru" required style="width:130px;">
+                                <button type="submit" class="btn-secondary">Reset</button>
+                            </form>
                             <form method="POST" action="<?= BASE_URL ?>/admin/users/delete" style="display:inline"
                                   onsubmit="return confirm('Hapus permanen user ini? Aksi ini tidak bisa dibatalkan.');">
                                 <input type="hidden" name="id" value="<?= $u['id'] ?>">
@@ -75,7 +98,7 @@
         <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
         <div class="form-group"><label>Nama</label><input type="text" name="name" required></div>
         <div class="form-group"><label>Email</label><input type="email" name="email" required></div>
-        <div class="form-group"><label>Password</label><input type="password" name="password" minlength="8" required></div>
+        <div class="form-group"><label>Password</label><input type="password" name="password" minlength="8" maxlength="72" required></div>
         <div class="form-group">
             <label>Role</label>
             <select name="role" required>

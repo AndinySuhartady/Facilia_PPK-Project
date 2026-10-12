@@ -72,6 +72,16 @@ class ReservationController
             redirect($redirectBack);
         }
 
+        // Batasi antrean: maksimal PENDING per user dan tidak boleh bentrok dengan reservasinya sendiri.
+        if (Reservation::countPendingByUser($userId) >= Reservation::MAX_PENDING_PER_USER) {
+            setFlash('error', 'Anda sudah memiliki ' . Reservation::MAX_PENDING_PER_USER . ' pengajuan yang menunggu persetujuan. Tunggu keputusan petugas atau batalkan salah satunya.');
+            redirect($redirectBack);
+        }
+        if (Reservation::userHasActiveOverlap($userId, $date, $startTime, $endTime)) {
+            setFlash('error', 'Anda sudah memiliki reservasi (menunggu/disetujui) yang bentrok pada tanggal dan jam tersebut.');
+            redirect($redirectBack);
+        }
+
         // 10) Tidak boleh overlap dengan reservasi APPROVED lain pada facility+tanggal yang sama.
         //     Karena user boleh memilih rentang bebas (multi-slot), overlap dicek langsung
         //     terhadap start_time/end_time yang dipilih — bukan per slot 30 menit satu-satu.
@@ -93,7 +103,16 @@ class ReservationController
         $this->requireUserRole();
         Reservation::autoCancelExpiredPending();
         $userId = (int) $_SESSION['user_id'];
-        $reservations = Reservation::historyByUser($userId);
+        // Search & sort riwayat (semua input divalidasi/whitelist).
+        $filters = [
+            'q'      => listingKeyword('q'),
+            'status' => listingChoice('status', ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']),
+            'date'   => listingDate('date'),
+            'sort'   => listingChoice('sort', array_keys(Reservation::HISTORY_SORTS), 'date'),
+            'dir'    => listingChoice('dir', ['asc', 'desc'], 'desc'),
+        ];
+        $hasActiveFilter = $filters['q'] !== '' || $filters['status'] !== '' || $filters['date'] !== '';
+        $reservations = Reservation::searchHistoryByUser($userId, $filters);
         require __DIR__ . '/../../views/user/reservation-history.php';
     }
 
@@ -109,6 +128,8 @@ class ReservationController
             echo 'Reservasi tidak ditemukan.';
             return;
         }
+        // Detail sudah dibuka → notifikasi terkait reservasi ini dianggap terbaca.
+        Notification::markReadByLink((int) $_SESSION['user_id'], '/reservation/detail?id=' . $id);
         require __DIR__ . '/../../views/user/reservation-detail.php';
     }
 
@@ -132,6 +153,16 @@ class ReservationController
             redirect('/reservation/history');
         }
 
+        // Alasan bersifat opsional, tetapi bila diisi harus bermakna dan muat di kolom (255).
+        if ($reason !== null && !isMeaningfulReason($reason, 10)) {
+            setFlash('error', 'Alasan pembatalan (jika diisi) minimal 10 karakter dan harus berupa penjelasan, bukan hanya angka/simbol.');
+            redirect('/reservation/history');
+        }
+        if ($reason !== null && !isWithinLength($reason, 255)) {
+            setFlash('error', 'Alasan pembatalan maksimal 255 karakter.');
+            redirect('/reservation/history');
+        }
+
         $reservation = $id ? Reservation::findById($id) : null;
 
         if (!$reservation) {
@@ -141,7 +172,6 @@ class ReservationController
 
         // Ownership check — user tidak boleh membatalkan reservasi milik user lain.
         if ((int) $reservation['user_id'] !== $userId) {
-            http_response_code(403);
             setFlash('error', 'Anda tidak berhak membatalkan reservasi ini.');
             redirect('/reservation/history');
         }

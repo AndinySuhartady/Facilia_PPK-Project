@@ -14,6 +14,7 @@ const RESERVATION_OPEN_TIME = '07:00';
 const RESERVATION_CLOSE_TIME = '20:00';
 const RESERVATION_SLOT_MINUTES = 30;
 const RESERVATION_MIN_DAYS_AHEAD = 1;
+const RESERVATION_MAX_DAYS_AHEAD = 90;
 
 /** Ubah "HH:MM" menjadi total menit sejak 00:00, atau null jika format tidak valid. */
 function timeToMinutes(string $time): ?int
@@ -62,6 +63,8 @@ function validateReservationTime(string $date, string $startTime, string $endTim
     $dateObj = DateTime::createFromFormat('Y-m-d', $date);
     if (!$dateObj || $dateObj->format('Y-m-d') !== $date) {
         $errors[] = 'Tanggal tidak valid.';
+    } elseif ($date > date('Y-m-d', strtotime('+' . RESERVATION_MAX_DAYS_AHEAD . ' day'))) {
+        $errors[] = 'Reservasi maksimal ' . RESERVATION_MAX_DAYS_AHEAD . ' hari ke depan.';
     } elseif ($date < $minimumDate) {
         $errors[] = 'Reservasi minimal H-1. Pilih tanggal ' . date('d-m-Y', strtotime($minimumDate)) . ' atau setelahnya.';
     }

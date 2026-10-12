@@ -72,7 +72,7 @@ sampai fasilitas otomatis ACTIVE⇄MAINTENANCE. Satu bug nyata ditemukan dan dip
 - User (role USER) membuat laporan kerusakan: pilih fasilitas ACTIVE, kategori (whitelist), deskripsi,
   foto opsional (JPG/PNG/WEBP, maks 2MB, nama file di-randomize)
 - "Laporan Saya" — riwayat & detail, dibatasi hanya milik sendiri
-- Panel Petugas (role PETUGAS/ADMIN):
+- Panel Petugas (khusus role PETUGAS — ADMIN dan USER mendapat 403 sesuai aturan akses terpisah):
   - **Antrean reservasi**: approve (dengan re-check overlap terhadap APPROVED lain tepat sebelum commit,
     sehingga dua reservasi identik yang diproses hampir bersamaan tidak bisa dua-duanya disetujui) /
     reject (wajib isi alasan) / emergency-cancel reservasi APPROVED (mis. fasilitas mendadak rusak)
@@ -111,13 +111,15 @@ ditambahkan, jalankan `database/migration_01_add_cancelled_at.sql` SEKALI di php
 
 ## Setup lokal (XAMPP)
 
-1. Salin folder `facilia/` ke `htdocs/`.
+0. Butuh **PHP 8.1+** (memakai `match`, `str_starts_with`, dan parameter `eol` pada `fputcsv`).
+1. Salin folder proyek (mis. `facilia-FinalPPK/`) ke `htdocs/`.
 2. Buka phpMyAdmin, jalankan `database/schema.sql` lalu `database/seed.sql`.
+2b. Jika memakai database lama, jalankan juga `database/migration_02_notifications_and_lengths.sql` (tabel notifikasi).
 3. Cek kredensial di `config/database.php` (default: `root` tanpa password, nama DB `facilia`).
 4. Sesuaikan `BASE_URL` di `config/app.php` dengan path akses lokal Anda, mis. `/facilia/public`.
 5. Pastikan `mod_rewrite` Apache aktif (dipakai `.htaccess` di folder `public/`).
 6. Pastikan extension `pdo_mysql` dan `fileinfo` aktif di `php.ini` (default aktif di XAMPP).
-7. Akses `http://localhost/facilia/public/login`.
+7. Akses `http://localhost/<nama-folder-proyek>/public/login`.
 
 **Akun demo** (password semua: `password123`):
 | Role    | Email                  |

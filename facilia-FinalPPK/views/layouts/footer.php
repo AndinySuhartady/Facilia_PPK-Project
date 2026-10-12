@@ -1,4 +1,14 @@
 </main><?php if(isLoggedIn()): ?></div></div><?php endif; ?>
+<style>
+/* Gaya inti dialog konfirmasi ditanam langsung di halaman, supaya dialog tetap tampil
+   di tengah layar & di atas sidebar walaupun browser masih memakai style.css lama (cache).
+   Tanpa ini, dialog sempat muncul di kiri bawah tertutup sidebar dan tombolnya tidak bisa diklik. */
+.confirm-modal[hidden]{display:none!important}
+.confirm-modal{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;padding:20px}
+.confirm-modal__backdrop{position:absolute;inset:0;background:rgba(15,23,42,.58)}
+.confirm-modal__panel{position:relative;z-index:1;width:min(440px,100%);padding:28px;background:#fff;border-radius:18px;box-shadow:0 24px 70px rgba(15,23,42,.28);text-align:center}
+.confirm-modal__actions{display:flex;justify-content:center;gap:10px;margin-top:24px}
+</style>
 <script>
 // Modal bersama untuk pengajuan dan pembatalan reservasi pengguna.
 window.confirmReservationAction = function(form, message) {

@@ -46,7 +46,7 @@
                 <input type="hidden" name="confirmed" value="0">
                 <div class="form-group">
                     <label>Alasan penolakan <span class="required">*</span></label>
-                    <textarea name="rejection_reason" required minlength="10" maxlength="1000" placeholder="Jelaskan alasan reservasi ini ditolak (minimal 10 karakter)..."></textarea>
+                    <textarea name="rejection_reason" required minlength="10" maxlength="255" placeholder="Jelaskan alasan reservasi ini ditolak (minimal 10 karakter)..."></textarea>
                 </div>
                 <button type="submit" class="btn-danger">Tolak Reservasi</button>
             </form>
@@ -61,7 +61,7 @@
             <input type="hidden" name="confirmed" value="0">
             <div class="form-group">
                 <label>Alasan pembatalan <span class="required">*</span></label>
-                <textarea name="cancellation_reason" required minlength="10" maxlength="1000" placeholder="Jelaskan alasan pembatalan darurat (minimal 10 karakter)..."></textarea>
+                <textarea name="cancellation_reason" required minlength="10" maxlength="255" placeholder="Jelaskan alasan pembatalan darurat (minimal 10 karakter)..."></textarea>
             </div>
             <button type="submit" class="btn-warning">Batalkan Reservasi</button>
         </form>

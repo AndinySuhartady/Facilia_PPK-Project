@@ -22,6 +22,9 @@
     <?php if (!empty($report['photo_path'])): ?>
         <p class="label" style="margin-top:16px;">Foto Kerusakan</p>
         <img src="<?= BASE_URL ?>/<?= htmlspecialchars($report['photo_path']) ?>" alt="Foto kerusakan" style="max-width:100%;border-radius:9px;">
+    <?php else: ?>
+        <p class="label" style="margin-top:16px;">Foto Kerusakan</p>
+        <p class="muted" style="margin:0;">Tidak ada foto yang dilampirkan.</p>
     <?php endif; ?>
 
     <?php if (!empty($report['resolution_note'])): ?>

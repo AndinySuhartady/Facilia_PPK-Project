@@ -13,7 +13,7 @@
 <a class="btn btn-secondary" href="<?= BASE_URL ?>/admin/analytics/export?<?= http_build_query(['from'=>$dateFrom,'to'=>$dateTo,'format'=>$format]) ?>"><?= $label ?></a>
 <?php endforeach; ?>
 <div style="overflow-x:auto"><table><thead><tr><th>Fasilitas</th><th>Lokasi</th><th>Booking disetujui</th><th>Jam terpakai</th><th>Jam periode</th><th>Okupansi</th></tr></thead><tbody>
-<?php foreach ($occupancy as $row): ?><tr><td><?= htmlspecialchars($row['name']) ?></td><td><?= htmlspecialchars($row['location']) ?></td><td><?= (int)$row['approved_count'] ?></td><td><?= number_format($row['used_hours'],2,',','.') ?></td><td><?= $row['available_hours'] ?></td><td><?= number_format($row['occupancy_percent'],2,',','.') ?>%</td></tr><?php endforeach; ?>
+<?php foreach ($occupancy as $row): ?><tr><td><?= htmlspecialchars($row['name']) ?></td><td><?= htmlspecialchars($row['location']) ?></td><td><?= (int)$row['approved_count'] ?></td><td><?= number_format($row['used_hours'],2,',','.') ?></td><td><?= $row['available_hours'] ?></td><td><div style="background:#e5e7eb;border-radius:4px;height:10px;width:140px;"><div style="background:#4f46e5;border-radius:4px;height:10px;width:<?= (int) min(100, max(0, round($row['occupancy_percent']))) ?>%;"></div></div><?= number_format($row['occupancy_percent'],2,',','.') ?>%</td></tr><?php endforeach; ?>
 <?php if (!$occupancy): ?><tr><td colspan="6">Belum ada fasilitas.</td></tr><?php endif; ?>
 </tbody></table></div>
 </div>

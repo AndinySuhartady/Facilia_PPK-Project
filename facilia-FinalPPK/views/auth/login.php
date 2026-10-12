@@ -15,7 +15,6 @@
         <button type="submit">Masuk</button>
     </form>
     <p style="margin-top:14px;font-size:0.9rem;">Belum punya akun? <a href="<?= BASE_URL ?>/register">Register</a></p>
-    <p style="margin-top:8px;font-size:0.8rem;color:#9ca3af;">Demo: admin@facilia.test / password123</p>
 </div>
 
 <?php require __DIR__ . '/../layouts/footer.php'; ?>

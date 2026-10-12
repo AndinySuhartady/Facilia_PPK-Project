@@ -1,5 +1,8 @@
 <?php
 
+require_once __DIR__ . '/Notification.php';
+require_once __DIR__ . '/../helpers/listing.php';
+
 class Reservation
 {
     /**
@@ -10,13 +13,38 @@ class Reservation
     {
         $today ??= date('Y-m-d');
         $reason = 'Dibatalkan otomatis karena belum disetujui petugas sebelum tanggal reservasi.';
-        $stmt = getDB()->prepare(
-            "UPDATE reservations
-             SET status = 'CANCELLED', cancellation_reason = ?, cancelled_at = NOW()
-             WHERE status = 'PENDING' AND reservation_date <= ?"
-        );
-        $stmt->execute([$reason, $today]);
-        return $stmt->rowCount();
+        $db = getDB();
+        $ownTransaction = !$db->inTransaction();
+        if ($ownTransaction) {
+            $db->beginTransaction();
+        }
+        try {
+            $select = $db->prepare("SELECT id, user_id FROM reservations WHERE status = 'PENDING' AND reservation_date <= ? FOR UPDATE");
+            $select->execute([$today]);
+            $expired = $select->fetchAll();
+            $count = 0;
+            if ($expired) {
+                $stmt = $db->prepare(
+                    "UPDATE reservations
+                     SET status = 'CANCELLED', cancellation_reason = ?, cancelled_at = NOW()
+                     WHERE status = 'PENDING' AND reservation_date <= ?"
+                );
+                $stmt->execute([$reason, $today]);
+                $count = $stmt->rowCount();
+                foreach ($expired as $row) {
+                    Notification::create((int) $row['user_id'], 'Reservasi #' . (int) $row['id'] . ' dibatalkan otomatis karena belum disetujui sebelum tanggal reservasi.', '/reservation/detail?id=' . (int) $row['id']);
+                }
+            }
+            if ($ownTransaction) {
+                $db->commit();
+            }
+            return $count;
+        } catch (Throwable $e) {
+            if ($ownTransaction && $db->inTransaction()) {
+                $db->rollBack();
+            }
+            throw $e;
+        }
     }
 
     /**
@@ -53,6 +81,28 @@ class Reservation
 
         $stmt = getDB()->prepare($sql);
         $stmt->execute($params);
+        return (int) $stmt->fetch()['total'] > 0;
+    }
+
+    /** Batas jumlah pengajuan PENDING per user, mencegah spam antrean petugas. */
+    public const MAX_PENDING_PER_USER = 5;
+
+    public static function countPendingByUser(int $userId): int
+    {
+        $stmt = getDB()->prepare("SELECT COUNT(*) AS total FROM reservations WHERE user_id = ? AND status = 'PENDING'");
+        $stmt->execute([$userId]);
+        return (int) $stmt->fetch()['total'];
+    }
+
+    /** User sudah punya reservasi PENDING/APPROVED yang bentrok di tanggal+jam yang sama (fasilitas apa pun). */
+    public static function userHasActiveOverlap(int $userId, string $date, string $startTime, string $endTime): bool
+    {
+        $stmt = getDB()->prepare(
+            "SELECT COUNT(*) AS total FROM reservations
+             WHERE user_id = ? AND reservation_date = ? AND status IN ('PENDING', 'APPROVED')
+               AND start_time < ? AND end_time > ?"
+        );
+        $stmt->execute([$userId, $date, $endTime, $startTime]);
         return (int) $stmt->fetch()['total'] > 0;
     }
 
@@ -102,13 +152,46 @@ class Reservation
         return $stmt->fetchAll();
     }
 
-    /** Cancel oleh USER pemilik: hanya mengubah status, ownership dicek di controller. */
-    public static function cancel(int $id, ?string $reason): void
+    /** Sorting riwayat reservasi user (whitelist). */
+    public const HISTORY_SORTS = [
+        'date'     => 'r.reservation_date %s, r.start_time %s',
+        'created'  => 'r.created_at %s, r.id %s',
+        'facility' => 'f.name %s, r.reservation_date DESC, r.start_time DESC',
+        'status'   => 'r.status %s, r.reservation_date DESC, r.start_time DESC',
+    ];
+
+    /**
+     * Riwayat reservasi user dengan search & sort.
+     * $filters: q (fasilitas/tujuan), status, date (Y-m-d), sort, dir.
+     */
+    public static function searchHistoryByUser(int $userId, array $filters): array
     {
-        $stmt = getDB()->prepare(
-            "UPDATE reservations SET status = 'CANCELLED', cancellation_reason = ? WHERE id = ?"
-        );
-        $stmt->execute([$reason, $id]);
+        $sql = 'SELECT r.*, f.name AS facility_name
+                FROM reservations r JOIN facilities f ON f.id = r.facility_id
+                WHERE r.user_id = ?';
+        $params = [$userId];
+
+        if (!empty($filters['q'])) {
+            $sql .= ' AND (f.name LIKE ? OR r.purpose LIKE ?)';
+            $params[] = likeKeyword($filters['q']);
+            $params[] = likeKeyword($filters['q']);
+        }
+        if (!empty($filters['status'])) {
+            $sql .= ' AND r.status = ?';
+            $params[] = $filters['status'];
+        }
+        if (!empty($filters['date'])) {
+            $sql .= ' AND r.reservation_date = ?';
+            $params[] = $filters['date'];
+        }
+
+        $sort = array_key_exists($filters['sort'] ?? '', self::HISTORY_SORTS) ? $filters['sort'] : 'date';
+        $dir = ($filters['dir'] ?? 'desc') === 'asc' ? 'ASC' : 'DESC';
+        $sql .= ' ORDER BY ' . sprintf(self::HISTORY_SORTS[$sort], $dir, $dir);
+
+        $stmt = getDB()->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll();
     }
 
     /** Batas pembatalan: sebelum waktu mulai, menurut timezone kampus (WIB). */
@@ -152,6 +235,69 @@ class Reservation
         return $stmt->fetchAll();
     }
 
+    /** Kolom yang boleh dipakai untuk sorting antrean (whitelist → aman dari SQL injection). */
+    public const QUEUE_SORTS = [
+        'date'     => 'r.reservation_date %s, r.start_time %s',
+        'time'     => 'r.start_time %s, r.reservation_date %s',
+        'facility' => 'f.name %s, r.reservation_date ASC, r.start_time ASC',
+        'user'     => 'u.name %s, r.reservation_date ASC, r.start_time ASC',
+        'created'  => 'r.created_at %s, r.id %s',
+    ];
+
+    /**
+     * Antrean reservasi petugas dengan filter & sorting.
+     * $filters: status, facility_id, date (Y-m-d), time (HH:MM — reservasi yang
+     * sedang berlangsung pada jam tsb), user (kata kunci nama/email), sort, dir.
+     */
+    public static function search(array $filters): array
+    {
+        $sql = "SELECT r.*, u.name AS user_name, u.email AS user_email, f.name AS facility_name
+                FROM reservations r
+                JOIN users u ON u.id = r.user_id
+                JOIN facilities f ON f.id = r.facility_id
+                WHERE 1 = 1";
+        $params = [];
+
+        if (!empty($filters['status'])) {
+            $sql .= ' AND r.status = ?';
+            $params[] = $filters['status'];
+        }
+        if (!empty($filters['facility_id'])) {
+            $sql .= ' AND r.facility_id = ?';
+            $params[] = (int) $filters['facility_id'];
+        }
+        if (!empty($filters['date'])) {
+            $sql .= ' AND r.reservation_date = ?';
+            $params[] = $filters['date'];
+        }
+        if (!empty($filters['time'])) {
+            // Reservasi yang mencakup jam tersebut (mulai <= jam < selesai).
+            $sql .= ' AND r.start_time <= ? AND r.end_time > ?';
+            $params[] = $filters['time'] . ':00';
+            $params[] = $filters['time'] . ':00';
+        }
+        if (!empty($filters['user'])) {
+            $sql .= ' AND (u.name LIKE ? OR u.email LIKE ?)';
+            $keyword = '%' . addcslashes($filters['user'], '%_\\') . '%';
+            $params[] = $keyword;
+            $params[] = $keyword;
+        }
+
+        $sort = array_key_exists($filters['sort'] ?? '', self::QUEUE_SORTS) ? $filters['sort'] : 'date';
+        $dir = strtoupper($filters['dir'] ?? 'ASC') === 'DESC' ? 'DESC' : 'ASC';
+        $sql .= ' ORDER BY ' . sprintf(self::QUEUE_SORTS[$sort], $dir, $dir);
+
+        $stmt = getDB()->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll();
+    }
+
+    /** Jumlah reservasi PENDING (badge sidebar petugas). */
+    public static function countPending(): int
+    {
+        return (int) getDB()->query("SELECT COUNT(*) FROM reservations WHERE status = 'PENDING'")->fetchColumn();
+    }
+
     /** Queue PENDING untuk petugas. */
     public static function pendingQueue(): array
     {
@@ -162,22 +308,6 @@ class Reservation
     {
         $stmt = getDB()->query('SELECT status, COUNT(*) AS total FROM reservations GROUP BY status');
         return $stmt->fetchAll();
-    }
-
-    /**
-     * Approve/reject oleh petugas — atomik: hanya berlaku jika reservasi MASIH PENDING
-     * (mencegah dua petugas memproses reservasi yang sama secara bersamaan).
-     * Re-check overlap untuk APPROVED dilakukan di controller SEBELUM memanggil ini,
-     * memakai hasApprovedOverlap() dengan excludeId = id reservasi ini sendiri.
-     */
-    public static function decide(int $id, string $status, ?string $rejectionReason): bool
-    {
-        $stmt = getDB()->prepare(
-            "UPDATE reservations SET status = ?, rejection_reason = ?
-             WHERE id = ? AND status = 'PENDING'"
-        );
-        $stmt->execute([$status, $rejectionReason, $id]);
-        return $stmt->rowCount() > 0;
     }
 
     /**
@@ -235,6 +365,11 @@ class Reservation
             }
 
             $db->commit();
+            if ($status === 'APPROVED') {
+                Notification::create((int) $reservation['user_id'], 'Reservasi #' . $id . ' Anda telah DISETUJUI.', '/reservation/detail?id=' . $id);
+            } else {
+                Notification::create((int) $reservation['user_id'], 'Reservasi #' . $id . ' Anda DITOLAK. Alasan: ' . $rejectionReason, '/reservation/detail?id=' . $id);
+            }
             return 'success';
         } catch (Throwable $e) {
             if ($db->inTransaction()) {
@@ -247,12 +382,22 @@ class Reservation
     /** Batalkan reservasi APPROVED mendatang saat fasilitas masuk maintenance. */
     public static function cancelApprovedForMaintenance(int $facilityId, string $reason): int
     {
-        $stmt = getDB()->prepare(
+        $db = getDB();
+        $select = $db->prepare("SELECT id, user_id FROM reservations WHERE facility_id = ? AND status = 'APPROVED' AND reservation_date >= CURDATE() FOR UPDATE");
+        $select->execute([$facilityId]);
+        $affected = $select->fetchAll();
+        if (!$affected) {
+            return 0;
+        }
+        $stmt = $db->prepare(
             "UPDATE reservations
              SET status = 'CANCELLED', cancellation_reason = ?, cancelled_at = NOW()
              WHERE facility_id = ? AND status = 'APPROVED' AND reservation_date >= CURDATE()"
         );
         $stmt->execute([$reason, $facilityId]);
+        foreach ($affected as $row) {
+            Notification::create((int) $row['user_id'], 'Reservasi #' . (int) $row['id'] . ' dibatalkan. Alasan: ' . $reason, '/reservation/detail?id=' . (int) $row['id']);
+        }
         return $stmt->rowCount();
     }
 
@@ -267,7 +412,15 @@ class Reservation
              WHERE id = ? AND status = 'APPROVED'"
         );
         $stmt->execute([$cancellationReason, $id]);
-        return $stmt->rowCount() > 0;
+        if ($stmt->rowCount() === 0) {
+            return false;
+        }
+        $owner = getDB()->prepare('SELECT user_id FROM reservations WHERE id = ?');
+        $owner->execute([$id]);
+        if ($row = $owner->fetch()) {
+            Notification::create((int) $row['user_id'], 'Reservasi #' . $id . ' dibatalkan oleh petugas. Alasan: ' . $cancellationReason, '/reservation/detail?id=' . $id);
+        }
+        return true;
     }
 
     /**

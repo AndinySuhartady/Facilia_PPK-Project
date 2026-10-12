@@ -15,6 +15,8 @@
 <input type="hidden" name="id" value="<?= (int) $reservation['id'] ?>">
 <input type="hidden" name="csrf_token" value="<?= csrfToken() ?>">
 <input type="hidden" name="confirmed" value="0">
+<div class="form-group"><label>Alasan pembatalan (opsional)</label>
+<textarea name="cancellation_reason" rows="2" maxlength="255" placeholder="Jelaskan alasan pembatalan (min. 10 karakter jika diisi)"></textarea></div>
 <button class="btn-danger" type="submit">Batalkan Reservasi</button>
 </form>
 <?php else: ?><p>Reservasi ini tidak dapat dibatalkan karena statusnya final atau waktu mulai sudah tercapai.</p><?php endif; ?>

@@ -16,7 +16,7 @@
         <input type="hidden" name="id" value="<?= $facility['id'] ?>">
         <div class="form-group">
             <label>Tanggal</label>
-            <input type="date" name="date" value="<?= htmlspecialchars($date) ?>" min="<?= htmlspecialchars($minimumReservationDate) ?>">
+            <input type="date" name="date" value="<?= htmlspecialchars($date) ?>" min="<?= htmlspecialchars($minimumReservationDate) ?>" max="<?= htmlspecialchars($maximumReservationDate) ?>">
         </div>
         <button type="submit">Lihat</button>
     </form>
@@ -104,13 +104,6 @@
         function toMinutes(hhmm) {
             const [h, m] = hhmm.split(':').map(Number);
             return h * 60 + m;
-        }
-
-        function confirmReservationAction(form, message) {
-            if (!confirm(message)) return false;
-            if (!confirm('Konfirmasi terakhir: data sudah benar dan Anda yakin?')) return false;
-            form.querySelector('[name="confirmed"]').value = '1';
-            return true;
         }
 
         startSelect.addEventListener('change', () => {

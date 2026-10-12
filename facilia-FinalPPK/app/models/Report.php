@@ -1,5 +1,8 @@
 <?php
 
+require_once __DIR__ . '/Notification.php';
+require_once __DIR__ . '/../helpers/listing.php';
+
 class Report
 {
     /** Whitelist kategori laporan — dipakai form & validasi server (kontrak Modul 3). */
@@ -55,6 +58,66 @@ class Report
         return $stmt->fetchAll();
     }
 
+    /** Sorting daftar laporan (whitelist). */
+    public const LIST_SORTS = [
+        'created'  => 'rp.created_at %s, rp.id %s',
+        'facility' => 'f.name %s, rp.created_at DESC',
+        'category' => 'rp.category %s, rp.created_at DESC',
+        'status'   => 'rp.status %s, rp.created_at DESC',
+        'reporter' => 'u.name %s, rp.created_at DESC',
+    ];
+
+    /**
+     * Daftar laporan dengan search, filter, dan sort.
+     * $filters: user_id (batasi milik user tsb), q, status, category, date (tanggal lapor), sort, dir.
+     * Untuk user, q mencari fasilitas/kategori/deskripsi; untuk petugas juga nama/email pelapor.
+     */
+    public static function search(array $filters): array
+    {
+        $sql = 'SELECT rp.*, u.name AS reporter_name, u.email AS reporter_email,
+                       f.name AS facility_name, f.location AS facility_location
+                FROM reports rp
+                JOIN users u ON u.id = rp.user_id
+                JOIN facilities f ON f.id = rp.facility_id
+                WHERE 1 = 1';
+        $params = [];
+
+        if (!empty($filters['user_id'])) {
+            $sql .= ' AND rp.user_id = ?';
+            $params[] = (int) $filters['user_id'];
+        }
+        if (!empty($filters['q'])) {
+            $kw = likeKeyword($filters['q']);
+            if (!empty($filters['user_id'])) {
+                $sql .= ' AND (f.name LIKE ? OR rp.category LIKE ? OR rp.description LIKE ?)';
+                array_push($params, $kw, $kw, $kw);
+            } else {
+                $sql .= ' AND (f.name LIKE ? OR rp.category LIKE ? OR rp.description LIKE ? OR u.name LIKE ? OR u.email LIKE ?)';
+                array_push($params, $kw, $kw, $kw, $kw, $kw);
+            }
+        }
+        if (!empty($filters['status'])) {
+            $sql .= ' AND rp.status = ?';
+            $params[] = $filters['status'];
+        }
+        if (!empty($filters['category'])) {
+            $sql .= ' AND rp.category = ?';
+            $params[] = $filters['category'];
+        }
+        if (!empty($filters['date'])) {
+            $sql .= ' AND DATE(rp.created_at) = ?';
+            $params[] = $filters['date'];
+        }
+
+        $sort = array_key_exists($filters['sort'] ?? '', self::LIST_SORTS) ? $filters['sort'] : 'created';
+        $dir = ($filters['dir'] ?? 'desc') === 'asc' ? 'ASC' : 'DESC';
+        $sql .= ' ORDER BY ' . sprintf(self::LIST_SORTS[$sort], $dir, $dir);
+
+        $stmt = getDB()->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll();
+    }
+
     /** Semua laporan (petugas), dengan filter status opsional. */
     public static function all(?string $status = null): array
     {
@@ -90,6 +153,20 @@ class Report
         return $stmt->fetchAll();
     }
 
+    /** Jumlah laporan yang masih BARU/DIPROSES untuk satu fasilitas. */
+    public static function countOpenByFacility(int $facilityId): int
+    {
+        $stmt = getDB()->prepare("SELECT COUNT(*) AS total FROM reports WHERE facility_id = ? AND status IN ('BARU', 'DIPROSES')");
+        $stmt->execute([$facilityId]);
+        return (int) $stmt->fetch()['total'];
+    }
+
+    /** Jumlah laporan BARU (badge sidebar petugas). */
+    public static function countNew(): int
+    {
+        return (int) getDB()->query("SELECT COUNT(*) FROM reports WHERE status = 'BARU'")->fetchColumn();
+    }
+
     public static function countByStatus(): array
     {
         $stmt = getDB()->query('SELECT status, COUNT(*) AS total FROM reports GROUP BY status');
@@ -104,7 +181,7 @@ class Report
      */
     public static function updateStatus(int $id, string $currentStatus, string $status, ?string $resolutionNote): bool
     {
-        $resolvedAt = in_array($status, ['SELESAI', 'DITOLAK'], true) ? date('Y-m-d H:i:s') : null;
+        $resolvedAt = in_array($status, ['SELESAI', 'DITOLAK'], true) ? (new DateTimeImmutable('now', new DateTimeZone('Asia/Jakarta')))->format('Y-m-d H:i:s') : null;
 
         $stmt = getDB()->prepare(
             'UPDATE reports SET status = ?, resolution_note = ?, resolved_at = ? WHERE id = ? AND status = ?'

@@ -39,9 +39,9 @@
             </div>
 
             <div class="form-group">
-                <label>Foto kerusakan *</label>
-                <input type="file" name="photo" required accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
-                <p class="file-help">Format JPG, PNG, atau WEBP. Maksimal 2MB.</p>
+                <label>Foto kerusakan <span class="optional">(opsional)</span></label>
+                <input type="file" name="photo" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp">
+                <p class="file-help">Boleh dikosongkan. Jika diunggah: format JPG, PNG, atau WEBP, maksimal 2MB.</p>
             </div>
 
             <div style="display:flex;justify-content:space-between;align-items:center;">

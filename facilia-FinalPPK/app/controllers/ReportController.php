@@ -25,13 +25,13 @@ class ReportController
         $facilities = Facility::searchPublic(null, null, null); // ACTIVE & MAINTENANCE
         $facilities = array_values(array_filter($facilities, fn ($f) => $f['status'] === 'ACTIVE'));
         $categories = Report::CATEGORIES;
-        $old = $_SESSION['old_report'] ?? ['facility_id' => '', 'category' => '', 'description' => ''];
+        $old = array_merge(['facility_id' => '', 'category' => '', 'description' => ''], $_SESSION['old_report'] ?? []);
         unset($_SESSION['old_report']);
 
         require __DIR__ . '/../../views/user/report-create.php';
     }
 
-    /** POST /report/create — validasi, upload foto wajib, simpan laporan BARU. */
+    /** POST /report/create — validasi, upload foto (opsional), simpan laporan BARU. */
     public function store(): void
     {
         $this->requireUserRole();
@@ -46,7 +46,7 @@ class ReportController
         $category = cleanInput($_POST['category'] ?? '');
         $description = cleanInput($_POST['description'] ?? '');
 
-        $_SESSION['old_report'] = compact('facilityId', 'category', 'description');
+        $_SESSION['old_report'] = ['facility_id' => $facilityId, 'category' => $category, 'description' => $description];
 
         $facility = $facilityId ? Facility::findById($facilityId) : null;
 
@@ -72,11 +72,7 @@ class ReportController
             redirect('/report/create');
         }
 
-        // Foto wajib, divalidasi juga di sisi server.
-        if (empty($_FILES['photo']) || ($_FILES['photo']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
-            setFlash('error', 'Foto kerusakan wajib diunggah.');
-            redirect('/report/create');
-        }
+        // Foto bersifat OPSIONAL. Jika diunggah, tetap divalidasi format & ukurannya di server.
         $photoPath = null;
         if (!empty($_FILES['photo']) && $_FILES['photo']['error'] !== UPLOAD_ERR_NO_FILE) {
             $photoPath = handleUpload($_FILES['photo'], __DIR__ . '/../../public/uploads/reports');
@@ -100,7 +96,17 @@ class ReportController
         $this->requireUserRole();
 
         $userId = (int) $_SESSION['user_id'];
-        $reports = Report::historyByUser($userId);
+        $categories = Report::CATEGORIES;
+        $filters = [
+            'q'        => listingKeyword('q'),
+            'status'   => listingChoice('status', ['BARU', 'DIPROSES', 'SELESAI', 'DITOLAK']),
+            'category' => listingChoice('category', Report::CATEGORIES),
+            'date'     => listingDate('date'),
+            'sort'     => listingChoice('sort', ['created', 'facility', 'category', 'status'], 'created'),
+            'dir'      => listingChoice('dir', ['asc', 'desc'], 'desc'),
+        ];
+        $hasActiveFilter = $filters['q'] !== '' || $filters['status'] !== '' || $filters['category'] !== '' || $filters['date'] !== '';
+        $reports = Report::search($filters + ['user_id' => $userId]);
         require __DIR__ . '/../../views/user/reports.php';
     }
 
@@ -117,6 +123,9 @@ class ReportController
             echo 'Laporan tidak ditemukan atau bukan milik Anda.';
             return;
         }
+
+        // Detail sudah dibuka → notifikasi terkait laporan ini dianggap terbaca.
+        Notification::markReadByLink((int) $_SESSION['user_id'], '/report/detail?id=' . $id);
 
         require __DIR__ . '/../../views/user/report-detail.php';
     }

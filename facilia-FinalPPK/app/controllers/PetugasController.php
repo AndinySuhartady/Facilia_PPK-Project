@@ -3,6 +3,7 @@
 require_once __DIR__ . '/../models/Reservation.php';
 require_once __DIR__ . '/../models/Report.php';
 require_once __DIR__ . '/../models/Facility.php';
+require_once __DIR__ . '/../models/Notification.php';
 require_once __DIR__ . '/../helpers/validation.php';
 
 class PetugasController
@@ -44,7 +45,37 @@ class PetugasController
         if (!isInWhitelist($status, ['', 'PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'])) {
             $status = '';
         }
-        $reservations = Reservation::all($status ?: null);
+        require_once __DIR__ . '/../helpers/slots.php';
+
+        // Filter tambahan: fasilitas, tanggal (kalender), jam, kata kunci user, dan sorting.
+        $facilityId = (int) ($_GET['facility_id'] ?? 0);
+        $date = trim($_GET['date'] ?? '');
+        $parsedDate = DateTimeImmutable::createFromFormat('!Y-m-d', $date);
+        if (!$parsedDate || $parsedDate->format('Y-m-d') !== $date) {
+            $date = '';
+        }
+        $timeOptions = generateTimeBoundaries();
+        $time = trim($_GET['time'] ?? '');
+        if (!in_array($time, $timeOptions, true)) {
+            $time = '';
+        }
+        $userKeyword = mb_substr(trim($_GET['user'] ?? ''), 0, 100);
+        $sort = array_key_exists($_GET['sort'] ?? '', Reservation::QUEUE_SORTS) ? $_GET['sort'] : 'date';
+        $dir = strtolower($_GET['dir'] ?? '') === 'desc' ? 'desc' : 'asc';
+
+        $filters = [
+            'status'      => $status,
+            'facility_id' => $facilityId,
+            'date'        => $date,
+            'time'        => $time,
+            'user'        => $userKeyword,
+            'sort'        => $sort,
+            'dir'         => $dir,
+        ];
+        $reservations = Reservation::search($filters);
+        $facilities = Facility::all();
+        $hasActiveFilter = $facilityId || $date !== '' || $time !== '' || $userKeyword !== '';
+
         require __DIR__ . '/../../views/petugas/reservation-queue.php';
     }
 
@@ -83,8 +114,8 @@ class PetugasController
                     setFlash('error', 'Hanya reservasi APPROVED yang dapat dibatalkan.');
                 } elseif (!isMeaningfulReason($cancellationReason, 10)) {
                     setFlash('error', 'Alasan pembatalan minimal 10 karakter dan harus berisi penjelasan, bukan hanya angka/simbol.');
-                } elseif (strlen($cancellationReason) > 1000) {
-                    setFlash('error', 'Alasan pembatalan maksimal 1000 karakter.');
+                } elseif (!isWithinLength($cancellationReason, 255)) {
+                    setFlash('error', 'Alasan pembatalan maksimal 255 karakter.');
                 } elseif (Reservation::cancelApproved($id, $cancellationReason)) {
                     setFlash('success', 'Reservasi berhasil dibatalkan.');
                     redirect('/petugas/reservations/detail?id=' . $id);
@@ -96,8 +127,8 @@ class PetugasController
                     setFlash('error', 'Reservasi ini sudah pernah diproses.');
                 } elseif ($decision === 'REJECTED' && !isMeaningfulReason($rejectionReason, 10)) {
                     setFlash('error', 'Alasan penolakan minimal 10 karakter dan harus berisi penjelasan.');
-                } elseif ($decision === 'REJECTED' && strlen($rejectionReason) > 1000) {
-                    setFlash('error', 'Alasan penolakan maksimal 1000 karakter.');
+                } elseif ($decision === 'REJECTED' && !isWithinLength($rejectionReason, 255)) {
+                    setFlash('error', 'Alasan penolakan maksimal 255 karakter.');
                 } else {
                     $result = Reservation::decideSafely(
                         $id,
@@ -137,7 +168,17 @@ class PetugasController
         if (!isInWhitelist($status, ['', 'BARU', 'DIPROSES', 'SELESAI', 'DITOLAK'])) {
             $status = '';
         }
-        $reports = Report::all($status ?: null);
+        $categories = Report::CATEGORIES;
+        $filters = [
+            'q'        => listingKeyword('q'),
+            'status'   => $status,
+            'category' => listingChoice('category', Report::CATEGORIES),
+            'date'     => listingDate('date'),
+            'sort'     => listingChoice('sort', array_keys(Report::LIST_SORTS), 'created'),
+            'dir'      => listingChoice('dir', ['asc', 'desc'], 'desc'),
+        ];
+        $hasActiveFilter = $filters['q'] !== '' || $filters['category'] !== '' || $filters['date'] !== '';
+        $reports = Report::search($filters);
         require __DIR__ . '/../../views/petugas/report-queue.php';
     }
 
@@ -177,7 +218,7 @@ class PetugasController
                             $db->beginTransaction();
                             if (!Facility::updateOperationalStatus((int) $facility['id'], 'ACTIVE', 'MAINTENANCE')) {
                                 $db->rollBack();
-                                setFlash('error', 'Status fasilitas gagal diperbarui karena sudah diubah petugas lain.');
+                                setFlash('error', 'Status fasilitas gagal diperbarui: status saat ini bukan ACTIVE (mungkin sudah diubah petugas/admin lain).');
                             } else {
                                 $cancelled = Reservation::cancelApprovedForMaintenance(
                                     (int) $facility['id'],
@@ -195,6 +236,8 @@ class PetugasController
                 } elseif ($newStatus === 'ACTIVE') {
                     if (!in_array($report['status'], ['SELESAI', 'DITOLAK'], true)) {
                         setFlash('error', 'Fasilitas dapat diaktifkan kembali setelah laporan ditutup (SELESAI/DITOLAK).');
+                    } elseif (Report::countOpenByFacility((int) $facility['id']) > 0) {
+                        setFlash('error', 'Fasilitas belum dapat diaktifkan: masih ada laporan lain (BARU/DIPROSES) untuk fasilitas ini.');
                     } elseif (Facility::updateOperationalStatus((int) $facility['id'], 'MAINTENANCE', 'ACTIVE')) {
                         setFlash('success', 'Fasilitas berhasil diaktifkan kembali.');
                         redirect('/petugas/reports/detail?id=' . $id);
@@ -213,9 +256,10 @@ class PetugasController
                     setFlash('error', 'Perubahan status laporan tidak diperbolehkan dari status saat ini.');
                 } elseif (in_array($newStatus, ['SELESAI', 'DITOLAK'], true) && !isMeaningfulReason($resolutionNote, 10)) {
                     setFlash('error', 'Catatan petugas untuk status ' . $newStatus . ' minimal 10 karakter dan harus berisi penjelasan.');
-                } elseif (strlen($resolutionNote) > 2000) {
+                } elseif (!isWithinLength($resolutionNote, 2000)) {
                     setFlash('error', 'Catatan petugas maksimal 2000 karakter.');
                 } elseif (Report::updateStatus($id, $report['status'], $newStatus, $resolutionNote ?: null)) {
+                    Notification::create((int) $report['user_id'], 'Laporan #' . $id . ' (' . $report['facility_name'] . ') kini berstatus ' . $newStatus . '.', '/report/detail?id=' . $id);
                     setFlash('success', 'Status laporan berhasil diperbarui.');
                     redirect('/petugas/reports/detail?id=' . $id);
                 } else {

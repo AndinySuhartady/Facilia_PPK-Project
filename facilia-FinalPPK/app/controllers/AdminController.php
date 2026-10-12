@@ -20,8 +20,8 @@ class AdminController
     public function dashboard(): void
     {
         $stats = [
-            'total_users' => count(User::all()),
-            'pending_users' => count(User::all('PENDING')),
+            'total_users' => User::countAll(),
+            'pending_users' => User::countAll('PENDING'),
             'total_petugas' => User::countByRole('PETUGAS'),
             'total_facilities' => count(Facility::all()),
         ];
@@ -115,8 +115,9 @@ class AdminController
 
         $errors = [];
         if ($name === '') $errors[] = 'Nama wajib diisi.';
-        if (!isValidEmail($email)) $errors[] = 'Email tidak valid.';
-        if (!isValidPassword($password)) $errors[] = 'Password minimal 8 karakter.';
+        elseif (!isWithinLength($name, 100)) $errors[] = 'Nama maksimal 100 karakter.';
+        if (!isValidEmail($email) || !isWithinLength($email, 150)) $errors[] = 'Email tidak valid (maksimal 150 karakter).';
+        if (!isValidNewPassword($password)) $errors[] = 'Password harus 8–72 karakter.';
         if (!isInWhitelist($role, ['USER', 'PETUGAS', 'ADMIN'])) $errors[] = 'Role tidak valid.';
         if ($email !== '' && User::findByEmail($email)) $errors[] = 'Email sudah terdaftar.';
 
@@ -127,9 +128,94 @@ class AdminController
 
         $hashed = password_hash($password, PASSWORD_DEFAULT);
         // Akun yang dibuat admin langsung VERIFIED (tidak perlu approval sendiri).
-        User::createByAdmin($name, $email, $hashed, $role, 'VERIFIED');
+        try {
+            User::createByAdmin($name, $email, $hashed, $role, 'VERIFIED');
+        } catch (PDOException $e) {
+            if ($e->getCode() === '23000') {
+                setFlash('errors', 'Email sudah terdaftar.');
+                redirect('/admin/users');
+            }
+            throw $e;
+        }
 
         setFlash('success', 'Akun ' . $role . ' berhasil dibuat.');
+        redirect('/admin/users');
+    }
+
+    /**
+     * POST /admin/users/status — nonaktifkan (VERIFIED→REJECTED) atau aktifkan kembali
+     * (REJECTED→VERIFIED). Tanpa perubahan skema: REJECTED sudah ditolak saat login.
+     */
+    public function setUserStatus(): void
+    {
+        $this->requireValidCsrf('/admin/users');
+        $id = (int) ($_POST['id'] ?? 0);
+        $action = $_POST['action'] ?? '';
+        $target = $id ? User::findById($id) : null;
+
+        if (!$target || !isInWhitelist($action, ['activate', 'deactivate'])) {
+            setFlash('error', 'Permintaan tidak valid.');
+            redirect('/admin/users');
+        }
+        if ($id === (int) $_SESSION['user_id']) {
+            setFlash('error', 'Anda tidak bisa mengubah status akun Anda sendiri.');
+            redirect('/admin/users');
+        }
+        if ($action === 'deactivate' && $target['verification_status'] === 'VERIFIED') {
+            User::updateVerificationStatus($id, 'REJECTED');
+            setFlash('success', 'Akun dinonaktifkan. User tidak dapat login lagi.');
+        } elseif ($action === 'activate' && $target['verification_status'] === 'REJECTED') {
+            User::updateVerificationStatus($id, 'VERIFIED');
+            setFlash('success', 'Akun diaktifkan kembali.');
+        } else {
+            setFlash('error', 'Status akun saat ini tidak sesuai dengan aksi yang diminta.');
+        }
+        redirect('/admin/users');
+    }
+
+    /** POST /admin/users/role — ubah role user lain (tidak boleh akun sendiri). */
+    public function changeUserRole(): void
+    {
+        $this->requireValidCsrf('/admin/users');
+        $id = (int) ($_POST['id'] ?? 0);
+        $role = $_POST['role'] ?? '';
+        $target = $id ? User::findById($id) : null;
+
+        if (!$target || !isInWhitelist($role, ['USER', 'PETUGAS', 'ADMIN'])) {
+            setFlash('error', 'Permintaan tidak valid.');
+            redirect('/admin/users');
+        }
+        if ($id === (int) $_SESSION['user_id']) {
+            setFlash('error', 'Anda tidak bisa mengubah role akun Anda sendiri.');
+            redirect('/admin/users');
+        }
+        User::updateRole($id, $role);
+        setFlash('success', 'Role ' . $target['name'] . ' diubah menjadi ' . $role . '.');
+        redirect('/admin/users');
+    }
+
+    /** POST /admin/users/reset-password — admin menetapkan password baru untuk user lain. */
+    public function resetUserPassword(): void
+    {
+        $this->requireValidCsrf('/admin/users');
+        $id = (int) ($_POST['id'] ?? 0);
+        $password = $_POST['new_password'] ?? '';
+        $target = $id ? User::findById($id) : null;
+
+        if (!$target) {
+            setFlash('error', 'User tidak ditemukan.');
+            redirect('/admin/users');
+        }
+        if ($id === (int) $_SESSION['user_id']) {
+            setFlash('error', 'Gunakan halaman Ubah Password untuk akun Anda sendiri.');
+            redirect('/admin/users');
+        }
+        if (!isValidNewPassword($password)) {
+            setFlash('error', 'Password baru harus 8–72 karakter.');
+            redirect('/admin/users');
+        }
+        User::updatePassword($id, password_hash($password, PASSWORD_DEFAULT));
+        setFlash('success', 'Password ' . $target['name'] . ' berhasil direset.');
         redirect('/admin/users');
     }
 
@@ -146,6 +232,11 @@ class AdminController
         $facility = null;
         if (!empty($_GET['id'])) {
             $facility = Facility::findById((int) $_GET['id']);
+            if (!$facility) {
+                http_response_code(404);
+                echo 'Fasilitas tidak ditemukan.';
+                return;
+            }
         }
         require __DIR__ . '/../../views/admin/facility-form.php';
     }
@@ -164,9 +255,13 @@ class AdminController
 
         $errors = [];
         if ($name === '') $errors[] = 'Nama fasilitas wajib diisi.';
+        elseif (!isWithinLength($name, 150)) $errors[] = 'Nama fasilitas maksimal 150 karakter.';
         if ($type === '') $errors[] = 'Tipe fasilitas wajib diisi.';
+        elseif (!isWithinLength($type, 50)) $errors[] = 'Tipe fasilitas maksimal 50 karakter.';
         if ($location === '') $errors[] = 'Lokasi wajib diisi.';
-        if (!isValidCapacity($capacity)) $errors[] = 'Kapasitas harus angka bulat > 0.';
+        elseif (!isWithinLength($location, 150)) $errors[] = 'Lokasi maksimal 150 karakter.';
+        if (!isValidCapacityRange($capacity)) $errors[] = 'Kapasitas harus angka bulat antara 1 dan 100.000.';
+        if (!isWithinLength($description, 5000)) $errors[] = 'Deskripsi maksimal 5.000 karakter.';
         if (!isInWhitelist($status, Facility::STATUSES)) $errors[] = 'Status tidak valid.';
 
         if ($errors) {
@@ -176,6 +271,10 @@ class AdminController
 
         if ($id) {
             $previous = Facility::findById($id);
+            if (!$previous) {
+                setFlash('error', 'Fasilitas tidak ditemukan.');
+                redirect('/admin/facilities');
+            }
             $db = getDB();
             try {
                 $db->beginTransaction();
